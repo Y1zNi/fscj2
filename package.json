@@ -1,0 +1,48 @@
+{
+  "name": "react-typescript",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "React TypeScript on Replit, using Vite bundler",
+  "bin": "./server/pkg-entry.cjs",
+  "scripts": {
+    "start": "npm run dev",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "server:desktop": "node server/pkg-entry.cjs",
+    "build:exe": "npm run build && pkg . --targets node18-win-x64 -o release/FSCJ-抓取服务.exe",
+    "build:mac": "npm run build && pkg . --targets node18-macos-arm64 -o release/FSCJ-mac-arm64 && pkg . --targets node18-macos-x64 -o release/FSCJ-mac-x64"
+  },
+  "pkg": {
+    "assets": [
+      "dist/**/*",
+      "server/xhs/static/**/*"
+    ],
+    "targets": [
+      "node18-win-x64",
+      "node18-macos-arm64",
+      "node18-macos-x64"
+    ]
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@lark-base-open/js-sdk": "^0.3.0-alpha",
+    "antd": "^5.8.5",
+    "crypto-js": "^4.2.0",
+    "express": "^4.21.2",
+    "iconv-lite": "^0.7.2",
+    "jsrsasign": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.15",
+    "@types/react-dom": "^18.0.6",
+    "@vitejs/plugin-react": "^2.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "pkg": "^5.8.1",
+    "typescript": "^4.7.4",
+    "vite": "^3.0.4"
+  }
+}

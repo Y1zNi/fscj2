@@ -1,0 +1,8 @@
+{
+  "name": "xhs-sign-runtime",
+  "private": true,
+  "description": "可选：在 server/xhs 执行 npm install，便于仅拷贝 static 时本地解析 crypto-js",
+  "dependencies": {
+    "crypto-js": "^4.2.0"
+  }
+}
