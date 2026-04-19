@@ -1,0 +1,43 @@
+# 在对应系统运行器上打包；Windows 上无法可靠地用 pkg 交叉产出 macOS 可执行文件。
+name: Build desktop binaries
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main, master]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx pkg . --targets node18-win-x64 -o release/FSCJ-抓取服务.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fscj2-windows
+          path: release/FSCJ-抓取服务.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx pkg . --targets node18-macos-arm64 -o release/FSCJ-mac-arm64
+      - run: npx pkg . --targets node18-macos-x64 -o release/FSCJ-mac-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fscj2-macos
+          path: |
+            release/FSCJ-mac-arm64
+            release/FSCJ-mac-x64
