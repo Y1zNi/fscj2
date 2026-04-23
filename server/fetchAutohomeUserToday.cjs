@@ -77,6 +77,56 @@ function buildMobileTopicReferer(uid, query) {
   return `https://i.m.autohome.com.cn/${uid}/club/topic${query || ''}`
 }
 
+function splitSetCookieHeader(setCookieRaw) {
+  if (!setCookieRaw) return []
+  return String(setCookieRaw)
+    .split(/,(?=[^;,\s]+=)/g)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+function getSetCookieListFromResponse(res) {
+  const headers = res && res.headers
+  if (!headers) return []
+  if (typeof headers.getSetCookie === 'function') {
+    const list = headers.getSetCookie()
+    return Array.isArray(list) ? list : []
+  }
+  const raw = headers.get('set-cookie')
+  return splitSetCookieHeader(raw)
+}
+
+function extractCookiePairsFromSetCookieList(setCookieList) {
+  const pairs = []
+  for (const row of setCookieList || []) {
+    const firstPart = String(row || '').split(';')[0].trim()
+    if (!firstPart || !firstPart.includes('=')) continue
+    pairs.push(firstPart)
+  }
+  return pairs
+}
+
+function mergeCookieHeader(baseCookie, appendCookie) {
+  const map = new Map()
+  const consume = (cookieText) => {
+    String(cookieText || '')
+      .split(';')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((pair) => {
+        const idx = pair.indexOf('=')
+        if (idx <= 0) return
+        const k = pair.slice(0, idx).trim()
+        const v = pair.slice(idx + 1).trim()
+        if (!k) return
+        map.set(k, v)
+      })
+  }
+  consume(baseCookie)
+  consume(appendCookie)
+  return [...map.entries()].map(([k, v]) => `${k}=${v}`).join('; ')
+}
+
 function normalizePostDateText(postdate) {
   return String(postdate || '')
     .replace(/\r/g, '')
@@ -296,7 +346,7 @@ async function fetchClubMThreadMainTopic(threadUrl) {
  * @param {number} pageIndex 1-based
  * @param {string} referer
  */
-async function fetchAjaxTopicPage(uid, pageIndex, referer) {
+async function fetchAjaxTopicPage(uid, pageIndex, referer, cookie) {
   const qs = new URLSearchParams({
     pageIndex: String(pageIndex),
     pageSize: String(PAGE_SIZE),
@@ -304,17 +354,22 @@ async function fetchAjaxTopicPage(uid, pageIndex, referer) {
   })
   const url = `https://i.m.autohome.com.cn/topic/AjaxTopic?${qs.toString()}`
   const body = new URLSearchParams({ v: String(Date.now()) }).toString()
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Origin: 'https://i.m.autohome.com.cn',
+    Referer: referer,
+    'User-Agent': MOBILE_UA,
+    'X-Requested-With': 'XMLHttpRequest',
+    'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
+  }
+  if (String(cookie || '').trim()) {
+    headers.Cookie = String(cookie).trim()
+  }
+
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Origin: 'https://i.m.autohome.com.cn',
-      Referer: referer,
-      'User-Agent': MOBILE_UA,
-      'X-Requested-With': 'XMLHttpRequest',
-      'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
-    },
+    headers,
     body,
     redirect: 'follow',
   })
@@ -335,6 +390,30 @@ async function fetchAjaxTopicPage(uid, pageIndex, referer) {
   return json
 }
 
+async function warmupAutohomeCookies(referer, cookie) {
+  const headers = {
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    Referer: referer,
+    'User-Agent': MOBILE_UA,
+    'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+  }
+  if (String(cookie || '').trim()) {
+    headers.Cookie = String(cookie).trim()
+  }
+
+  const res = await fetch(referer, {
+    method: 'GET',
+    headers,
+    redirect: 'follow',
+  })
+  const setCookieList = getSetCookieListFromResponse(res)
+  const cookiePairs = extractCookiePairsFromSetCookieList(setCookieList)
+  return cookiePairs.join('; ')
+}
+
 /**
  * @param {string} profileUrlRaw
  */
@@ -347,10 +426,26 @@ async function fetchAutohomeUserTodayPostsRaw(profileUrlRaw, options = {}) {
   const todayPosts = []
   const seenTopic = new Set()
   let pageIndex = 1
+  let sessionCookie = ''
 
   while (true) {
     if (pageIndex > 1) await sleepRandomCarBetweenRequestsMs()
-    const json = await fetchAjaxTopicPage(uid, pageIndex, referer)
+    let json
+    try {
+      json = await fetchAjaxTopicPage(uid, pageIndex, referer, sessionCookie)
+    } catch (err) {
+      const msg = String((err && err.message) || err || '')
+      const shouldWarmup =
+        /AjaxTopic 返回非 JSON（HTTP 405）/.test(msg) ||
+        /AjaxTopic 请求失败 HTTP 405/.test(msg)
+      if (!shouldWarmup) {
+        throw err
+      }
+      const warmupCookie = await warmupAutohomeCookies(referer, sessionCookie)
+      sessionCookie = mergeCookieHeader(sessionCookie, warmupCookie)
+      await sleepRandomCarBetweenRequestsMs()
+      json = await fetchAjaxTopicPage(uid, pageIndex, referer, sessionCookie)
+    }
     const result = json.result || {}
     const list = Array.isArray(result.list) ? result.list : []
     const pagecount = Math.max(1, Number(result.pagecount) || 1)

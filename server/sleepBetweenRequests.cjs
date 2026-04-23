@@ -13,11 +13,11 @@ function sleepRandomBetweenRequestsMs() {
 }
 
 /**
- * 汽车之家 / 懂车帝 / 易车：同上，随机 0～1.5 秒
+ * 汽车之家 / 懂车帝 / 易车：同上，随机 1～3 秒
  * @returns {Promise<void>}
  */
 function sleepRandomCarBetweenRequestsMs() {
-  const ms = Math.floor(Math.random() * 1501)
+  const ms = 1000 + Math.floor(Math.random() * 2000)
   return new Promise((r) => setTimeout(r, ms))
 }
 
