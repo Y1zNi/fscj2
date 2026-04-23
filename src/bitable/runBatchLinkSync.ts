@@ -1,4 +1,4 @@
-import { bitable, FieldType } from '@lark-base-open/js-sdk'
+﻿import { bitable, FieldType } from '@lark-base-open/js-sdk'
 import type {
   IDateTimeField,
   INumberField,
@@ -16,15 +16,17 @@ import { isObviousXhsUserUrl } from '../xhs/isXhsUserUrl'
 import { fetchYicheUserTodayPosts } from '../yiche/fetchUserToday'
 import { isObviousYichePageUrl } from '../yiche/isYichePageUrl'
 
+import type { DateScope } from '../douyin/fetchUserToday'
+
 /** 抖音、小红书：同平台相邻两次抓取最小间隔 */
 const MIN_GAP_DYXHS_MS = 3000
 /** 汽车之家、懂车帝、易车：同平台相邻两次抓取最小间隔 */
 const MIN_GAP_CAR_MS = 1500
-const DY_DETAIL_TABLE_NAME_DEFAULT = '抖音今日明细'
-const XHS_DETAIL_TABLE_NAME_DEFAULT = '小红书今日明细'
-const AH_DETAIL_TABLE_NAME_DEFAULT = '汽车之家今日明细'
-const DC_DETAIL_TABLE_NAME_DEFAULT = '懂车帝今日明细'
-const YI_DETAIL_TABLE_NAME_DEFAULT = '易车今日明细'
+const DY_DETAIL_TABLE_NAME_DEFAULT = '抖音明细'
+const XHS_DETAIL_TABLE_NAME_DEFAULT = '小红书明细'
+const AH_DETAIL_TABLE_NAME_DEFAULT = '汽车之家明细'
+const DC_DETAIL_TABLE_NAME_DEFAULT = '懂车帝明细'
+const YI_DETAIL_TABLE_NAME_DEFAULT = '易车明细'
 
 /**
  * 明细子表是否创建并写入「用户 id + 作品/内容 id」列。
@@ -116,6 +118,7 @@ export interface BatchLinkSyncConfig {
   yiDetailTableName?: string
   onProgress?: (done: number, total: number, recordId: string) => void
   delayMs?: number
+  dateScope?: DateScope
 }
 
 /** 距上次同平台请求结束不足 minGapMs 则补眠，各平台分别计时 */
@@ -142,13 +145,48 @@ function formatDateTime(sec: number): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`
 }
 
-/** 明细「抓取日期」：当天本地 yyyy-mm-dd */
-function getTodayDateText(): string {
+/** 根据窗口返回抓取日期文本（today / yesterday） */
+function getDateTextByScope(scope: DateScope): string {
   const d = new Date()
+  if (scope === 'yesterday') {
+    d.setDate(d.getDate() - 1)
+  }
   const yyyy = d.getFullYear()
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const dd = String(d.getDate()).padStart(2, '0')
   return `${yyyy}-${mm}-${dd}`
+}
+
+function getDateScopeLabel(scope: DateScope): string {
+  const scopeLabelMap: Record<DateScope, string> = {
+    today: '今天',
+    yesterday: '昨天',
+    last3Days: '3天内',
+    last7Days: '7天内',
+    last30Days: '一个月内',
+    last90Days: '三个月内',
+    last180Days: '半年内',
+    last365Days: '一年内',
+  }
+  return scopeLabelMap[scope]
+}
+
+function getExecutionTimeText(d: Date): string {
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return `${yyyy}${mm}${dd}_${hh}${mi}${ss}`
+}
+
+function buildExecutionDetailTableName(
+  platformName: string,
+  dateScope: DateScope,
+  executedAt: Date,
+): string {
+  return `${platformName}_${getDateScopeLabel(dateScope)}_${getExecutionTimeText(executedAt)}`
 }
 
 /**
@@ -695,6 +733,45 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
   dongchediOk: number
   yicheOk: number
 }> {
+  const validScopes: DateScope[] = [
+    'today',
+    'yesterday',
+    'last3Days',
+    'last7Days',
+    'last30Days',
+    'last90Days',
+    'last180Days',
+    'last365Days',
+  ]
+  const dateScope: DateScope = validScopes.includes(config.dateScope as DateScope)
+    ? (config.dateScope as DateScope)
+    : 'yesterday'
+  const executedAt = new Date()
+  const dyDetailTableName = buildExecutionDetailTableName(
+    DY_DETAIL_TABLE_NAME_DEFAULT.replace('明细', ''),
+    dateScope,
+    executedAt,
+  )
+  const xhsDetailTableName = buildExecutionDetailTableName(
+    XHS_DETAIL_TABLE_NAME_DEFAULT.replace('明细', ''),
+    dateScope,
+    executedAt,
+  )
+  const ahDetailTableName = buildExecutionDetailTableName(
+    AH_DETAIL_TABLE_NAME_DEFAULT.replace('明细', ''),
+    dateScope,
+    executedAt,
+  )
+  const dcDetailTableName = buildExecutionDetailTableName(
+    DC_DETAIL_TABLE_NAME_DEFAULT.replace('明细', ''),
+    dateScope,
+    executedAt,
+  )
+  const yiDetailTableName = buildExecutionDetailTableName(
+    YI_DETAIL_TABLE_NAME_DEFAULT.replace('明细', ''),
+    dateScope,
+    executedAt,
+  )
   const table = await bitable.base.getActiveTable()
   const linkField = await table.getField(config.linkFieldId)
   const isDyWritebackEnabled = Boolean(
@@ -715,12 +792,12 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
 
   const dyDetailCtx = isDyWritebackEnabled
     ? await ensureDouyinDetailTable(
-        config.dyDetailTableName || DY_DETAIL_TABLE_NAME_DEFAULT,
+        dyDetailTableName,
       )
     : null
   const xhsDetailCtx = isXhsWritebackEnabled
     ? await ensureXhsDetailTable(
-        config.xhsDetailTableName || XHS_DETAIL_TABLE_NAME_DEFAULT,
+        xhsDetailTableName,
       )
     : null
   const awemeIdToRecordIdMap =
@@ -739,7 +816,7 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
       : new Map<string, string>()
   const ahDetailCtx = isAhWritebackEnabled
     ? await ensureAutohomeDetailTable(
-        config.ahDetailTableName || AH_DETAIL_TABLE_NAME_DEFAULT,
+        ahDetailTableName,
       )
     : null
   const topicIdToRecordIdMap =
@@ -751,7 +828,7 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
       : new Map<string, string>()
   const dcDetailCtx = isDcWritebackEnabled
     ? await ensureDongchediDetailTable(
-        config.dcDetailTableName || DC_DETAIL_TABLE_NAME_DEFAULT,
+        dcDetailTableName,
       )
     : null
   const articleIdToRecordIdMap =
@@ -763,7 +840,7 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
       : new Map<string, string>()
   const yiDetailCtx = isYiWritebackEnabled
     ? await ensureYicheDetailTable(
-        config.yiDetailTableName || YI_DETAIL_TABLE_NAME_DEFAULT,
+        yiDetailTableName,
       )
     : null
   const yichePostIdToRecordIdMap =
@@ -864,8 +941,12 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
       }
       try {
         await sleepUntilPlatformGap(lastDouyinRequestEndAt, minGapDyXhsMs)
-        const data = await fetchDouyinUserTodayPosts(urlRaw, config.douyinCookie)
-        const crawlDate = getTodayDateText()
+        const data = await fetchDouyinUserTodayPosts(
+          urlRaw,
+          config.douyinCookie,
+          dateScope,
+        )
+        const crawlDate = getDateTextByScope(dateScope)
 
         for (const item of data.todayPosts) {
           const recordValue = {
@@ -942,8 +1023,12 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
       }
       try {
         await sleepUntilPlatformGap(lastXhsRequestEndAt, minGapDyXhsMs)
-        const data = await fetchXhsUserTodayPosts(urlRaw, config.xhsCookie)
-        const crawlDate = getTodayDateText()
+        const data = await fetchXhsUserTodayPosts(
+          urlRaw,
+          config.xhsCookie,
+          dateScope,
+        )
+        const crawlDate = getDateTextByScope(dateScope)
 
         for (const item of data.todayPosts) {
           const recordValue = {
@@ -1013,8 +1098,8 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
       }
       try {
         await sleepUntilPlatformGap(lastAutohomeRequestEndAt, minGapCarMs)
-        const data = await fetchAutohomeUserTodayPosts(urlRaw)
-        const crawlDate = getTodayDateText()
+        const data = await fetchAutohomeUserTodayPosts(urlRaw, dateScope)
+        const crawlDate = getDateTextByScope(dateScope)
 
         for (const item of data.todayPosts) {
           const contentType = [item.topicType, item.bbsName]
@@ -1083,8 +1168,8 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
       }
       try {
         await sleepUntilPlatformGap(lastDongchediRequestEndAt, minGapCarMs)
-        const data = await fetchDongchediUserTodayPosts(urlRaw)
-        const crawlDate = getTodayDateText()
+        const data = await fetchDongchediUserTodayPosts(urlRaw, dateScope)
+        const crawlDate = getDateTextByScope(dateScope)
 
         for (const item of data.todayPosts) {
           const recordValue = {
@@ -1148,8 +1233,8 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
       }
       try {
         await sleepUntilPlatformGap(lastYicheRequestEndAt, minGapCarMs)
-        const data = await fetchYicheUserTodayPosts(urlRaw)
-        const crawlDate = getTodayDateText()
+        const data = await fetchYicheUserTodayPosts(urlRaw, dateScope)
+        const crawlDate = getDateTextByScope(dateScope)
 
         for (const item of data.todayPosts) {
           const recordValue = {

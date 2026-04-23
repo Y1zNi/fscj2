@@ -30,6 +30,7 @@ import { isObviousXhsUserUrl } from './xhs/isXhsUserUrl'
 import { fetchYicheUserTodayPosts } from './yiche/fetchUserToday'
 import type { YicheUserTodayPosts } from './yiche/handleUserToday'
 import { isObviousYichePageUrl } from './yiche/isYichePageUrl'
+import type { DateScope } from './douyin/fetchUserToday'
 
 const { TextArea } = Input
 const { Title, Text } = Typography
@@ -50,21 +51,17 @@ function App() {
 
   const [linkFieldId, setLinkFieldId] = useState<string | undefined>()
   const [dyTodayCountId, setDyTodayCountId] = useState<string | undefined>()
-  const [dyDetailTableName, setDyDetailTableName] = useState('抖音今日明细')
 
   const [xhsTodayCountId, setXhsTodayCountId] = useState<string | undefined>()
-  const [xhsDetailTableName, setXhsDetailTableName] = useState('小红书今日明细')
 
   const [ahTodayCountId, setAhTodayCountId] = useState<string | undefined>()
-  const [ahDetailTableName, setAhDetailTableName] = useState('汽车之家今日明细')
   const [dcTodayCountId, setDcTodayCountId] = useState<string | undefined>()
-  const [dcDetailTableName, setDcDetailTableName] = useState('懂车帝今日明细')
   const [yiTodayCountId, setYiTodayCountId] = useState<string | undefined>()
-  const [yiDetailTableName, setYiDetailTableName] = useState('易车今日明细')
 
   const [douyinCookie, setDouyinCookie] = useState('')
   const [xhsCookie, setXhsCookie] = useState('')
   const [manualUrl, setManualUrl] = useState('')
+  const [dateScope, setDateScope] = useState<DateScope>('yesterday')
   const [loading, setLoading] = useState(false)
   const [batchProgress, setBatchProgress] = useState<{
     done: number
@@ -78,6 +75,17 @@ function App() {
   const [dcToday, setDcToday] = useState<DongchediUserTodayPosts | null>(null)
   const [yiToday, setYiToday] = useState<YicheUserTodayPosts | null>(null)
   const [batchSummary, setBatchSummary] = useState<string | null>(null)
+  const scopeLabelMap: Record<DateScope, string> = {
+    today: '今天',
+    yesterday: '昨天',
+    last3Days: '3天内',
+    last7Days: '7天内',
+    last30Days: '一个月内',
+    last90Days: '三个月内',
+    last180Days: '半年内',
+    last365Days: '一年内',
+  }
+  const scopeLabel = scopeLabelMap[dateScope]
 
   const loadTable = useCallback(async () => {
     setLoadErr(null)
@@ -139,7 +147,11 @@ function App() {
       }
       setLoading(true)
       try {
-        const data = await fetchDouyinUserTodayPosts(manualUrl, douyinCookie)
+        const data = await fetchDouyinUserTodayPosts(
+          manualUrl,
+          douyinCookie,
+          dateScope,
+        )
         setDyStats(data)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -155,7 +167,7 @@ function App() {
       }
       setLoading(true)
       try {
-        const data = await fetchXhsUserTodayPosts(manualUrl, xhsCookie)
+        const data = await fetchXhsUserTodayPosts(manualUrl, xhsCookie, dateScope)
         setXhsToday(data)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -167,7 +179,7 @@ function App() {
     if (isObviousAutohomeAuthorUrl(manualUrl)) {
       setLoading(true)
       try {
-        const data = await fetchAutohomeUserTodayPosts(manualUrl)
+        const data = await fetchAutohomeUserTodayPosts(manualUrl, dateScope)
         setAhToday(data)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -179,7 +191,7 @@ function App() {
     if (isObviousDongchediArticleUrl(manualUrl)) {
       setLoading(true)
       try {
-        const data = await fetchDongchediUserTodayPosts(manualUrl)
+        const data = await fetchDongchediUserTodayPosts(manualUrl, dateScope)
         setDcToday(data)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -191,7 +203,7 @@ function App() {
     if (isObviousYichePageUrl(manualUrl)) {
       setLoading(true)
       try {
-        const data = await fetchYicheUserTodayPosts(manualUrl)
+        const data = await fetchYicheUserTodayPosts(manualUrl, dateScope)
         setYiToday(data)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -236,15 +248,11 @@ function App() {
         douyinCookie,
         xhsCookie,
         dyTodayCountId,
-        dyDetailTableName,
         xhsTodayCountId,
-        xhsDetailTableName,
         ahTodayCountId,
-        ahDetailTableName,
         dcTodayCountId,
-        dcDetailTableName,
         yiTodayCountId,
-        yiDetailTableName,
+        dateScope,
         onProgress: (done, total_) => {
           setBatchProgress({ done, total: total_ })
         },
@@ -318,8 +326,25 @@ function App() {
                 style={{ display: 'block', marginBottom: 10, fontSize: 12 }}
               >
                 同一列可混排各平台链接。切换标签配置写回列；未选列则该项不落表。
-                主表「同步日期」写回已暂时关闭，仅「今日更新数」与明细子表参与写回。
+                主表「同步日期」写回已暂时关闭，仅更新数与明细子表参与写回。明细表每次执行都会新建，
+                命名规则为「平台名_时间范围_执行时间」。
               </Text>
+              <div style={{ marginBottom: 6, fontWeight: 500 }}>抓取日期范围</div>
+              <Select
+                style={{ width: '100%', marginBottom: 10 }}
+                value={dateScope}
+                onChange={(v) => setDateScope(v as DateScope)}
+                options={[
+                  { label: '一年内', value: 'last365Days' },
+                  { label: '半年内', value: 'last180Days' },
+                  { label: '三个月内', value: 'last90Days' },
+                  { label: '一个月内', value: 'last30Days' },
+                  { label: '7天内', value: 'last7Days' },
+                  { label: '3天内', value: 'last3Days' },
+                  { label: '昨天（00:00-24:00）', value: 'yesterday' },
+                  { label: '今天（00:00-24:00）', value: 'today' },
+                ]}
+              />
               <div style={{ marginBottom: 6, fontWeight: 500 }}>链接列</div>
               <Select
                 style={{ width: '100%' }}
@@ -349,22 +374,14 @@ function App() {
                         style={{ width: '100%' }}
                       >
                         <FieldSelect
-                          label="今日更新数（主表：数字列）"
+                          label="范围内更新数（主表：数字列）"
                           options={numberOptions}
                           value={dyTodayCountId}
                           onChange={setDyTodayCountId}
                         />
-                        <div>
-                          <div style={{ marginBottom: 4, fontSize: 12 }}>
-                            明细子表名（自动创建，非主表列）
-                          </div>
-                          <Input
-                            placeholder="默认：抖音今日明细"
-                            value={dyDetailTableName}
-                            onChange={(e) => setDyDetailTableName(e.target.value)}
-                            allowClear
-                          />
-                        </div>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          明细子表自动命名：平台名_时间范围_执行时间
+                        </Text>
                       </Space>
                     </MappingFieldScroll>
                   ),
@@ -380,22 +397,14 @@ function App() {
                         style={{ width: '100%' }}
                       >
                         <FieldSelect
-                          label="今日更新数（主表：数字列）"
+                          label="范围内更新数（主表：数字列）"
                           options={numberOptions}
                           value={xhsTodayCountId}
                           onChange={setXhsTodayCountId}
                         />
-                        <div>
-                          <div style={{ marginBottom: 4, fontSize: 12 }}>
-                            明细子表名（自动创建，非主表列）
-                          </div>
-                          <Input
-                            placeholder="默认：小红书今日明细"
-                            value={xhsDetailTableName}
-                            onChange={(e) => setXhsDetailTableName(e.target.value)}
-                            allowClear
-                          />
-                        </div>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          明细子表自动命名：平台名_时间范围_执行时间
+                        </Text>
                       </Space>
                     </MappingFieldScroll>
                   ),
@@ -411,22 +420,14 @@ function App() {
                         style={{ width: '100%' }}
                       >
                         <FieldSelect
-                          label="今日更新数（主表：数字列）"
+                          label="范围内更新数（主表：数字列）"
                           options={numberOptions}
                           value={ahTodayCountId}
                           onChange={setAhTodayCountId}
                         />
-                        <div>
-                          <div style={{ marginBottom: 4, fontSize: 12 }}>
-                            明细子表名（自动创建，非主表列）
-                          </div>
-                          <Input
-                            placeholder="默认：汽车之家今日明细"
-                            value={ahDetailTableName}
-                            onChange={(e) => setAhDetailTableName(e.target.value)}
-                            allowClear
-                          />
-                        </div>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          明细子表自动命名：平台名_时间范围_执行时间
+                        </Text>
                       </Space>
                     </MappingFieldScroll>
                   ),
@@ -442,22 +443,14 @@ function App() {
                         style={{ width: '100%' }}
                       >
                         <FieldSelect
-                          label="今日更新数（主表：数字列）"
+                          label="范围内更新数（主表：数字列）"
                           options={numberOptions}
                           value={dcTodayCountId}
                           onChange={setDcTodayCountId}
                         />
-                        <div>
-                          <div style={{ marginBottom: 4, fontSize: 12 }}>
-                            明细子表名（自动创建，非主表列）
-                          </div>
-                          <Input
-                            placeholder="默认：懂车帝今日明细"
-                            value={dcDetailTableName}
-                            onChange={(e) => setDcDetailTableName(e.target.value)}
-                            allowClear
-                          />
-                        </div>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          明细子表自动命名：平台名_时间范围_执行时间
+                        </Text>
                       </Space>
                     </MappingFieldScroll>
                   ),
@@ -473,22 +466,14 @@ function App() {
                         style={{ width: '100%' }}
                       >
                         <FieldSelect
-                          label="今日更新数（主表：数字列）"
+                          label="范围内更新数（主表：数字列）"
                           options={numberOptions}
                           value={yiTodayCountId}
                           onChange={setYiTodayCountId}
                         />
-                        <div>
-                          <div style={{ marginBottom: 4, fontSize: 12 }}>
-                            明细子表名（自动创建，非主表列）
-                          </div>
-                          <Input
-                            placeholder="默认：易车今日明细"
-                            value={yiDetailTableName}
-                            onChange={(e) => setYiDetailTableName(e.target.value)}
-                            allowClear
-                          />
-                        </div>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          明细子表自动命名：平台名_时间范围_执行时间
+                        </Text>
                       </Space>
                     </MappingFieldScroll>
                   ),
@@ -590,10 +575,10 @@ function App() {
           <Alert type="error" message={error} showIcon />
         ) : null}
         {dyStats ? (
-          <Card size="small" title="抖音今日预览">
+          <Card size="small" title={`抖音${scopeLabel}预览`}>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">
-                今日更新 {dyStats.todayPosts.length} 条
+                {scopeLabel}更新 {dyStats.todayPosts.length} 条
               </Text>
               <pre
                 style={{
@@ -615,10 +600,10 @@ function App() {
           </Card>
         ) : null}
         {xhsToday ? (
-          <Card size="small" title="小红书今日预览">
+          <Card size="small" title={`小红书${scopeLabel}预览`}>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">
-                今日更新 {xhsToday.todayPosts.length} 条
+                {scopeLabel}更新 {xhsToday.todayPosts.length} 条
               </Text>
               <pre
                 style={{
@@ -640,10 +625,10 @@ function App() {
           </Card>
         ) : null}
         {ahToday ? (
-          <Card size="small" title="汽车之家今日预览">
+          <Card size="small" title={`汽车之家${scopeLabel}预览`}>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">
-                uid {ahToday.uid || '—'} · 今日发帖 {ahToday.todayPosts.length} 条（文案为 M 站详情正文）
+                uid {ahToday.uid || '—'} · {scopeLabel}发帖 {ahToday.todayPosts.length} 条（文案为 M 站详情正文）
               </Text>
               <pre
                 style={{
@@ -667,10 +652,10 @@ function App() {
           </Card>
         ) : null}
         {dcToday ? (
-          <Card size="small" title="懂车帝今日预览">
+          <Card size="small" title={`懂车帝${scopeLabel}预览`}>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">
-                user_id {dcToday.userId || '—'} · 今日更新 {dcToday.todayPosts.length} 条
+                user_id {dcToday.userId || '—'} · {scopeLabel}更新 {dcToday.todayPosts.length} 条
               </Text>
               <pre
                 style={{
@@ -694,10 +679,10 @@ function App() {
           </Card>
         ) : null}
         {yiToday ? (
-          <Card size="small" title="易车今日预览">
+          <Card size="small" title={`易车${scopeLabel}预览`}>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">
-                user_id {yiToday.userId || '—'} · 今日更新 {yiToday.todayPosts.length} 条
+                user_id {yiToday.userId || '—'} · {scopeLabel}更新 {yiToday.todayPosts.length} 条
               </Text>
               <pre
                 style={{

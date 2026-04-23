@@ -8,7 +8,6 @@ const MOBILE_UA =
 
 const FLOW_API_URL = 'https://mapi.yiche.com/web_api/flow_api/api/v1/flow/user_home_page'
 const FLOW_CID = '601'
-const MAX_PAGE_COUNT = 20
 
 function normalizeYicheUserTopicsUrl(raw) {
   const s = String(raw || '').trim()
@@ -27,13 +26,54 @@ function normalizeYicheUserTopicsUrl(raw) {
   }
 }
 
-/** 当天本地日期 yyyy-mm-dd，与 flow 列表「今日」筛选一致 */
-function getTodayText() {
-  const d = new Date()
-  const yyyy = d.getFullYear()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
+function normalizeDateScope(scope) {
+  const valid = new Set([
+    'today',
+    'yesterday',
+    'last3Days',
+    'last7Days',
+    'last30Days',
+    'last90Days',
+    'last180Days',
+    'last365Days',
+  ])
+  return valid.has(scope) ? scope : 'yesterday'
+}
+
+/** 生成目标窗口 [startMs, endMs) */
+function getRangeMsByScope(scope) {
+  const dateScope = normalizeDateScope(scope)
+  const now = new Date()
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0,
+  ).getTime()
+  const yesterdayStart = todayStart - 86400000
+  const tomorrowStart = todayStart + 86400000
+  if (dateScope === 'today') {
+    return { startMs: todayStart, endMs: tomorrowStart }
+  }
+  const daysMap = {
+    last3Days: 3,
+    last7Days: 7,
+    last30Days: 30,
+    last90Days: 90,
+    last180Days: 180,
+    last365Days: 365,
+  }
+  if (daysMap[dateScope]) {
+    const days = daysMap[dateScope]
+    return {
+      startMs: todayStart - (days - 1) * 86400000,
+      endMs: tomorrowStart,
+    }
+  }
+  return { startMs: yesterdayStart, endMs: todayStart }
 }
 
 function decodeHtmlEntities(text) {
@@ -92,6 +132,13 @@ function getDatePrefix(text) {
   return m ? m[0] : ''
 }
 
+function parseDatePrefixToMs(text) {
+  const prefix = getDatePrefix(text)
+  if (!prefix) return 0
+  const ts = new Date(prefix.replace(/-/g, '/')).getTime()
+  return Number.isFinite(ts) ? ts : 0
+}
+
 function buildYichePostUrl(item) {
   const mLinkUrl = String(item.mLinkUrl || '').trim()
   const newsUrl = String(item.newsUrl || '').trim()
@@ -134,11 +181,14 @@ function detectYicheContentType(item) {
   return ''
 }
 
-function isTodayItem(item, todayText) {
+function isInDateRange(item, startMs, endMs) {
   const ts = Number(item.publishTimestamp || 0)
-  const byTimestamp = formatDate(ts)
-  if (byTimestamp) return byTimestamp === todayText
-  return getDatePrefix(item.publishTime) === todayText
+  if (Number.isFinite(ts) && ts > 0) {
+    return ts >= startMs && ts < endMs
+  }
+  const dateMs = parseDatePrefixToMs(item.publishTime)
+  if (!dateMs) return false
+  return dateMs >= startMs && dateMs < endMs
 }
 
 function toTodayPostItem(item) {
@@ -201,11 +251,12 @@ async function requestFlowPage(userId, referer, timestamp) {
   return json.data
 }
 
-async function fetchYicheTodayPostsByFlow(userId, profileUrl) {
-  const todayText = getTodayText()
+async function fetchYicheTodayPostsByFlow(userId, profileUrl, dateScope) {
+  const { startMs, endMs } = getRangeMsByScope(dateScope)
   const dedupeMap = new Map()
   let cursor = Date.now()
-  for (let i = 0; i < MAX_PAGE_COUNT; i += 1) {
+  let i = 0
+  while (true) {
     if (i > 0) await sleepRandomCarBetweenRequestsMs()
     const pageData = await requestFlowPage(userId, profileUrl, cursor)
     const list = Array.isArray(pageData.list) ? pageData.list : []
@@ -214,7 +265,7 @@ async function fetchYicheTodayPostsByFlow(userId, profileUrl) {
     let hasToday = false
     let hasOldDate = false
     for (const one of list) {
-      if (isTodayItem(one, todayText)) {
+      if (isInDateRange(one, startMs, endMs)) {
         hasToday = true
         const post = toTodayPostItem(one)
         if (post && !dedupeMap.has(post.postId)) dedupeMap.set(post.postId, post)
@@ -228,6 +279,7 @@ async function fetchYicheTodayPostsByFlow(userId, profileUrl) {
     cursor = nextCursor
 
     if (!hasToday && hasOldDate) break
+    i += 1
   }
   return Array.from(dedupeMap.values())
 }
@@ -236,9 +288,13 @@ async function fetchYicheTodayPostsByFlow(userId, profileUrl) {
  * 易车主页今日更新（flow/user_home_page + timestamp 翻页）
  * @param {string} profileUrlRaw
  */
-async function fetchYicheUserTodayPostsRaw(profileUrlRaw) {
+async function fetchYicheUserTodayPostsRaw(profileUrlRaw, options = {}) {
   const { userId, profileUrl } = normalizeYicheUserTopicsUrl(profileUrlRaw)
-  const todayPosts = await fetchYicheTodayPostsByFlow(userId, profileUrl)
+  const todayPosts = await fetchYicheTodayPostsByFlow(
+    userId,
+    profileUrl,
+    options.dateScope,
+  )
   return {
     userId,
     profileUrl,

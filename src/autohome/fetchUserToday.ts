@@ -2,17 +2,20 @@ import {
   handleAutohomeUserTodayResponse,
   type AutohomeUserTodayPosts,
 } from './handleUserToday'
+import type { DateScope } from '../douyin/fetchUserToday'
 
 const API = '/api/autohome-user-today'
 
 export async function fetchAutohomeUserTodayPosts(
   profileUrl: string,
+  dateScope: DateScope,
 ): Promise<AutohomeUserTodayPosts> {
   const res = await fetch(API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       profileUrl: profileUrl.trim(),
+      dateScope,
     }),
   })
   const payload = (await res.json()) as {

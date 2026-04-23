@@ -3,16 +3,31 @@ import {
   type DouyinUserTodayPosts,
 } from './handleUserToday'
 
+export type DateScope =
+  | 'today'
+  | 'yesterday'
+  | 'last3Days'
+  | 'last7Days'
+  | 'last30Days'
+  | 'last90Days'
+  | 'last180Days'
+  | 'last365Days'
+
 const DETAIL_API = '/api/douyin-user-today'
 
 export async function fetchDouyinUserTodayPosts(
   userUrl: string,
   cookie: string,
+  dateScope: DateScope,
 ): Promise<DouyinUserTodayPosts> {
   const res = await fetch(DETAIL_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userUrl: userUrl.trim(), cookie: cookie.trim() }),
+    body: JSON.stringify({
+      userUrl: userUrl.trim(),
+      cookie: cookie.trim(),
+      dateScope,
+    }),
   })
   const payload = (await res.json()) as {
     ok: boolean

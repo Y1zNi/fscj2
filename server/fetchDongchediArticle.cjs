@@ -1,4 +1,4 @@
-'use strict'
+﻿'use strict'
 
 const { sleepRandomCarBetweenRequestsMs } = require('./sleepBetweenRequests.cjs')
 
@@ -239,16 +239,67 @@ function parseDisplayTimeSec(raw) {
   return n
 }
 
-/** 按本地日历「今日」判断（秒级时间戳） */
-function isTodayByLocalSec(sec) {
-  if (!sec) return false
-  const d = new Date(sec * 1000)
-  const ref = new Date()
-  return (
-    d.getFullYear() === ref.getFullYear() &&
-    d.getMonth() === ref.getMonth() &&
-    d.getDate() === ref.getDate()
+function normalizeDateScope(scope) {
+  const valid = new Set([
+    'today',
+    'yesterday',
+    'last3Days',
+    'last7Days',
+    'last30Days',
+    'last90Days',
+    'last180Days',
+    'last365Days',
+  ])
+  return valid.has(scope) ? scope : 'yesterday'
+}
+
+function getRangeSecByScope(scope) {
+  const dateScope = normalizeDateScope(scope)
+  const now = new Date()
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0,
   )
+  const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000)
+  const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000)
+  if (dateScope === 'today') {
+    return {
+      startSec: Math.floor(todayStart.getTime() / 1000),
+      endSec: Math.floor(tomorrowStart.getTime() / 1000),
+    }
+  }
+  const daysMap = {
+    last3Days: 3,
+    last7Days: 7,
+    last30Days: 30,
+    last90Days: 90,
+    last180Days: 180,
+    last365Days: 365,
+  }
+  if (daysMap[dateScope]) {
+    const days = daysMap[dateScope]
+    const start = new Date(todayStart.getTime() - (days - 1) * 24 * 60 * 60 * 1000)
+    return {
+      startSec: Math.floor(start.getTime() / 1000),
+      endSec: Math.floor(tomorrowStart.getTime() / 1000),
+    }
+  }
+  return {
+    startSec: Math.floor(yesterdayStart.getTime() / 1000),
+    endSec: Math.floor(todayStart.getTime() / 1000),
+  }
+}
+
+/** 按时间范围判断（秒级时间戳） */
+function isInDateScopeByLocalSec(sec, scope) {
+  if (!sec) return false
+  const { startSec, endSec } = getRangeSecByScope(scope)
+  return sec >= startSec && sec < endSec
 }
 
 function parseArticleIdFromFeedItem(item) {
@@ -458,10 +509,10 @@ async function fetchDongchediArticleStats(articleUrlRaw, options = {}) {
 }
 
 /**
- * 主页动态：先取用户主页 feed，筛出今日文章 id，再逐条抓 /article/{id} 详情
+ * 主页动态：先取用户主页 feed，按日期窗口筛文章 id，再逐条抓 /article/{id} 详情
  * @param {string} profileUrlRaw
  */
-async function fetchDongchediUserTodayPostsRaw(profileUrlRaw) {
+async function fetchDongchediUserTodayPostsRaw(profileUrlRaw, options = {}) {
   const original = String(profileUrlRaw || '').trim()
   if (!original) throw new Error('懂车帝链接为空')
   const { userId, userUrl } = normalizeDongchediUserUrl(original)
@@ -477,7 +528,7 @@ async function fetchDongchediUserTodayPostsRaw(profileUrlRaw) {
   for (const item of feedItems) {
     if (!item || typeof item !== 'object') continue
     const displayTime = parseDisplayTimeSec(item.display_time)
-    if (!isTodayByLocalSec(displayTime)) continue
+    if (!isInDateScopeByLocalSec(displayTime, options.dateScope)) continue
     const articleId = parseArticleIdFromFeedItem(item)
     if (!articleId || idSeen.has(articleId)) continue
     idSeen.add(articleId)

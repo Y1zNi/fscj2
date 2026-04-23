@@ -79,8 +79,23 @@ async function generateWebid(cookieHeader, refererUrl) {
   return n
 }
 
-/** 本地自然日「今日」0 点～明日 0 点（秒级窗口） */
-function getTodayRangeTs() {
+function normalizeDateScope(scope) {
+  const valid = new Set([
+    'today',
+    'yesterday',
+    'last3Days',
+    'last7Days',
+    'last30Days',
+    'last90Days',
+    'last180Days',
+    'last365Days',
+  ])
+  return valid.has(scope) ? scope : 'yesterday'
+}
+
+/** 支持 today / yesterday 的本地日历窗口（秒） */
+function getRangeTsByScope(scope) {
+  const dateScope = normalizeDateScope(scope)
   const now = new Date()
   const todayStart = new Date(
     now.getFullYear(),
@@ -91,10 +106,33 @@ function getTodayRangeTs() {
     0,
     0,
   )
+  const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000)
   const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000)
+  if (dateScope === 'today') {
+    return {
+      startSec: Math.floor(todayStart.getTime() / 1000),
+      endSec: Math.floor(tomorrowStart.getTime() / 1000),
+    }
+  }
+  const daysMap = {
+    last3Days: 3,
+    last7Days: 7,
+    last30Days: 30,
+    last90Days: 90,
+    last180Days: 180,
+    last365Days: 365,
+  }
+  if (daysMap[dateScope]) {
+    const days = daysMap[dateScope]
+    const start = new Date(todayStart.getTime() - (days - 1) * 24 * 60 * 60 * 1000)
+    return {
+      startSec: Math.floor(start.getTime() / 1000),
+      endSec: Math.floor(tomorrowStart.getTime() / 1000),
+    }
+  }
   return {
-    startSec: Math.floor(todayStart.getTime() / 1000),
-    endSec: Math.floor(tomorrowStart.getTime() / 1000),
+    startSec: Math.floor(yesterdayStart.getTime() / 1000),
+    endSec: Math.floor(todayStart.getTime() / 1000),
   }
 }
 
@@ -200,7 +238,7 @@ async function requestUserPosts({
   return json
 }
 
-async function fetchDouyinUserTodayPostsRaw(userUrl, cookieStr) {
+async function fetchDouyinUserTodayPostsRaw(userUrl, cookieStr, options = {}) {
   const cookies = transCookies(cookieStr)
   if (!cookies.s_v_web_id) {
     throw new Error('Cookie 中缺少 s_v_web_id，请从已登录抖音网页复制完整 Cookie')
@@ -211,14 +249,13 @@ async function fetchDouyinUserTodayPostsRaw(userUrl, cookieStr) {
   const verifyFp = cookies.s_v_web_id
   const cookieHeader = cookiesToHeader(cookies)
   const webid = await generateWebid(cookieHeader, userUrl)
-  const { startSec, endSec } = getTodayRangeTs()
+  const { startSec, endSec } = getRangeTsByScope(options.dateScope)
 
   const todayPosts = []
   const seenMap = new Map()
   let maxCursor = '0'
   let hasMore = true
-  let page = 0
-  while (hasMore && page < 8) {
+  while (hasMore) {
     await sleepRandomBetweenRequestsMs()
     const json = await requestUserPosts({
       secUserId,
@@ -249,7 +286,6 @@ async function fetchDouyinUserTodayPostsRaw(userUrl, cookieStr) {
     hasMore = Number(json?.has_more || 0) === 1
     maxCursor = String(json?.max_cursor ?? '')
     if (!hasMore || !maxCursor) break
-    page++
   }
 
   for (const item of seenMap.values()) {

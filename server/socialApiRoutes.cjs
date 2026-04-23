@@ -5,6 +5,20 @@
  * @param {(path: string, handler: (req: import('http').IncomingMessage, res: import('http').ServerResponse) => void) => void} mount
  */
 function mountSocialApiRoutes(mount) {
+  function normalizeDateScope(scope) {
+    const valid = new Set([
+      'today',
+      'yesterday',
+      'last3Days',
+      'last7Days',
+      'last30Days',
+      'last90Days',
+      'last180Days',
+      'last365Days',
+    ])
+    return valid.has(scope) ? scope : 'yesterday'
+  }
+
   mount('/api/douyin-user-today', (req, res) => {
     if (req.method !== 'POST') {
       res.statusCode = 405
@@ -21,6 +35,7 @@ function mountSocialApiRoutes(mount) {
           const { fetchDouyinUserTodayPostsRaw } = require('./fetchDouyinUserToday.cjs')
           const parsed = JSON.parse(body || '{}')
           const { userUrl, cookie } = parsed
+          const dateScope = normalizeDateScope(parsed.dateScope)
           if (!userUrl || !cookie) {
             res.statusCode = 400
             res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -32,7 +47,9 @@ function mountSocialApiRoutes(mount) {
             )
             return
           }
-          const data = await fetchDouyinUserTodayPostsRaw(userUrl, cookie)
+          const data = await fetchDouyinUserTodayPostsRaw(userUrl, cookie, {
+            dateScope,
+          })
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           res.end(JSON.stringify({ ok: true, data }))
         } catch (e) {
@@ -65,6 +82,7 @@ function mountSocialApiRoutes(mount) {
           const { fetchXhsUserTodayPostsRaw } = require('./fetchXhsNote.cjs')
           const parsed = JSON.parse(body || '{}')
           const { profileUrl, cookie } = parsed
+          const dateScope = normalizeDateScope(parsed.dateScope)
           if (!profileUrl || !cookie) {
             res.statusCode = 400
             res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -76,7 +94,9 @@ function mountSocialApiRoutes(mount) {
             )
             return
           }
-          const data = await fetchXhsUserTodayPostsRaw(profileUrl, cookie)
+          const data = await fetchXhsUserTodayPostsRaw(profileUrl, cookie, {
+            dateScope,
+          })
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           res.end(JSON.stringify({ ok: true, data }))
         } catch (e) {
@@ -109,6 +129,7 @@ function mountSocialApiRoutes(mount) {
           const { fetchAutohomeUserTodayPostsRaw } = require('./fetchAutohomeUserToday.cjs')
           const parsed = JSON.parse(body || '{}')
           const { profileUrl } = parsed
+          const dateScope = normalizeDateScope(parsed.dateScope)
           if (!profileUrl) {
             res.statusCode = 400
             res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -120,7 +141,9 @@ function mountSocialApiRoutes(mount) {
             )
             return
           }
-          const data = await fetchAutohomeUserTodayPostsRaw(profileUrl)
+          const data = await fetchAutohomeUserTodayPostsRaw(profileUrl, {
+            dateScope,
+          })
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           res.end(JSON.stringify({ ok: true, data }))
         } catch (e) {
@@ -194,13 +217,16 @@ function mountSocialApiRoutes(mount) {
           const { fetchDongchediUserTodayPostsRaw } = require('./fetchDongchediArticle.cjs')
           const parsed = JSON.parse(body || '{}')
           const { profileUrl } = parsed
+          const dateScope = normalizeDateScope(parsed.dateScope)
           if (!profileUrl || typeof profileUrl !== 'string') {
             res.statusCode = 400
             res.setHeader('Content-Type', 'application/json; charset=utf-8')
             res.end(JSON.stringify({ ok: false, message: '缺少 profileUrl' }))
             return
           }
-          const data = await fetchDongchediUserTodayPostsRaw(profileUrl)
+          const data = await fetchDongchediUserTodayPostsRaw(profileUrl, {
+            dateScope,
+          })
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           res.end(JSON.stringify({ ok: true, data }))
         } catch (e) {
@@ -233,13 +259,16 @@ function mountSocialApiRoutes(mount) {
           const { fetchYicheUserTodayPostsRaw } = require('./fetchYichePage.cjs')
           const parsed = JSON.parse(body || '{}')
           const profileUrl = parsed.profileUrl
+          const dateScope = normalizeDateScope(parsed.dateScope)
           if (!profileUrl || typeof profileUrl !== 'string') {
             res.statusCode = 400
             res.setHeader('Content-Type', 'application/json; charset=utf-8')
             res.end(JSON.stringify({ ok: false, message: '缺少 profileUrl' }))
             return
           }
-          const data = await fetchYicheUserTodayPostsRaw(profileUrl)
+          const data = await fetchYicheUserTodayPostsRaw(profileUrl, {
+            dateScope,
+          })
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           res.end(JSON.stringify({ ok: true, data }))
         } catch (e) {

@@ -1,11 +1,10 @@
-'use strict'
+﻿'use strict'
 
 const { sleepRandomCarBetweenRequestsMs } = require('./sleepBetweenRequests.cjs')
 
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1'
 
-const MAX_PAGES = 40
 const PAGE_SIZE = 20
 
 function normalizeInputUrl(raw) {
@@ -94,8 +93,23 @@ function parsePostDateToMs(postdate) {
   return Number.isNaN(t) ? null : t
 }
 
-/** 本地自然日「今日」0 点～明日 0 点（毫秒） */
-function getTodayStartEndMs() {
+function normalizeDateScope(scope) {
+  const valid = new Set([
+    'today',
+    'yesterday',
+    'last3Days',
+    'last7Days',
+    'last30Days',
+    'last90Days',
+    'last180Days',
+    'last365Days',
+  ])
+  return valid.has(scope) ? scope : 'yesterday'
+}
+
+/** 支持多时间范围的本地日历窗口（毫秒） */
+function getStartEndMsByScope(scope) {
+  const dateScope = normalizeDateScope(scope)
   const now = new Date()
   const todayStart = new Date(
     now.getFullYear(),
@@ -106,8 +120,27 @@ function getTodayStartEndMs() {
     0,
     0,
   ).getTime()
+  const yesterdayStart = todayStart - 86400000
   const tomorrowStart = todayStart + 86400000
-  return { startMs: todayStart, endMs: tomorrowStart }
+  if (dateScope === 'today') {
+    return { startMs: todayStart, endMs: tomorrowStart }
+  }
+  const daysMap = {
+    last3Days: 3,
+    last7Days: 7,
+    last30Days: 30,
+    last90Days: 90,
+    last180Days: 180,
+    last365Days: 365,
+  }
+  if (daysMap[dateScope]) {
+    const days = daysMap[dateScope]
+    return {
+      startMs: todayStart - (days - 1) * 86400000,
+      endMs: tomorrowStart,
+    }
+  }
+  return { startMs: yesterdayStart, endMs: todayStart }
 }
 
 /**
@@ -305,17 +338,17 @@ async function fetchAjaxTopicPage(uid, pageIndex, referer) {
 /**
  * @param {string} profileUrlRaw
  */
-async function fetchAutohomeUserTodayPostsRaw(profileUrlRaw) {
+async function fetchAutohomeUserTodayPostsRaw(profileUrlRaw, options = {}) {
   const profileUrl = String(profileUrlRaw || '').trim()
   const { uid, query } = parseAuthorClubTopicUrl(profileUrl)
   const referer = buildMobileTopicReferer(uid, query)
-  const { startMs, endMs } = getTodayStartEndMs()
+  const { startMs, endMs } = getStartEndMsByScope(options.dateScope)
 
   const todayPosts = []
   const seenTopic = new Set()
   let pageIndex = 1
 
-  while (pageIndex <= MAX_PAGES) {
+  while (true) {
     if (pageIndex > 1) await sleepRandomCarBetweenRequestsMs()
     const json = await fetchAjaxTopicPage(uid, pageIndex, referer)
     const result = json.result || {}
@@ -385,7 +418,7 @@ async function fetchAutohomeUserTodayPostsRaw(profileUrlRaw) {
       break
     }
 
-    // 列表按发帖时间倒序：本页最旧一条已在「今日 0 点」之前，则无需再翻页
+    // 列表按发帖时间倒序：本页最旧一条已在目标窗口起点之前，则无需再翻页
     if (hasParsedDate && minMsInPage !== Infinity && minMsInPage < startMs) {
       break
     }

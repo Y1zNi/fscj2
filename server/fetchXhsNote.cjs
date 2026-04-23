@@ -306,8 +306,23 @@ function parseUserProfileUrl(profileUrl) {
   return { userId, xsecToken, xsecSource }
 }
 
-/** 本地自然日「今日」0 点～明日 0 点（秒级窗口） */
-function getTodayRangeSec() {
+function normalizeDateScope(scope) {
+  const valid = new Set([
+    'today',
+    'yesterday',
+    'last3Days',
+    'last7Days',
+    'last30Days',
+    'last90Days',
+    'last180Days',
+    'last365Days',
+  ])
+  return valid.has(scope) ? scope : 'yesterday'
+}
+
+/** 支持多时间范围的本地日历窗口（秒） */
+function getRangeSecByScope(scope) {
+  const dateScope = normalizeDateScope(scope)
   const now = new Date()
   const todayStart = new Date(
     now.getFullYear(),
@@ -318,10 +333,33 @@ function getTodayRangeSec() {
     0,
     0,
   )
+  const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000)
   const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000)
+  if (dateScope === 'today') {
+    return {
+      startSec: Math.floor(todayStart.getTime() / 1000),
+      endSec: Math.floor(tomorrowStart.getTime() / 1000),
+    }
+  }
+  const daysMap = {
+    last3Days: 3,
+    last7Days: 7,
+    last30Days: 30,
+    last90Days: 90,
+    last180Days: 180,
+    last365Days: 365,
+  }
+  if (daysMap[dateScope]) {
+    const days = daysMap[dateScope]
+    const start = new Date(todayStart.getTime() - (days - 1) * 24 * 60 * 60 * 1000)
+    return {
+      startSec: Math.floor(start.getTime() / 1000),
+      endSec: Math.floor(tomorrowStart.getTime() / 1000),
+    }
+  }
   return {
-    startSec: Math.floor(todayStart.getTime() / 1000),
-    endSec: Math.floor(tomorrowStart.getTime() / 1000),
+    startSec: Math.floor(yesterdayStart.getTime() / 1000),
+    endSec: Math.floor(todayStart.getTime() / 1000),
   }
 }
 
@@ -396,15 +434,14 @@ async function fetchUserPostedPage(cookieStr, userId, cursor, xsecToken, xsecSou
   return json
 }
 
-async function fetchXhsUserTodayPostsRaw(profileUrl, cookieStr) {
+async function fetchXhsUserTodayPostsRaw(profileUrl, cookieStr, options = {}) {
   const { userId, xsecToken, xsecSource } = parseUserProfileUrl(profileUrl)
-  const { startSec, endSec } = getTodayRangeSec()
+  const { startSec, endSec } = getRangeSecByScope(options.dateScope)
   const seen = new Map()
   let cursor = ''
   let page = 0
-  const maxPages = 8
 
-  while (page < maxPages) {
+  while (true) {
     if (page > 0) await sleepRandomBetweenRequestsMs()
     const resJson = await fetchUserPostedPage(
       cookieStr,
