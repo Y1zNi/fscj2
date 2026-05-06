@@ -363,32 +363,17 @@ function getRangeSecByScope(scope) {
   }
 }
 
-function notePublishMsFromPosted(item) {
-  if (!item || typeof item !== 'object') return null
-  const candidates = [
-    item.time,
-    item.create_time,
-    item.ts,
-    item.publish_time,
-    item.corner_time,
-    item?.corner_time_info?.time,
-    item?.note_card?.time,
-  ]
-  for (const t of candidates) {
-    if (t == null) continue
-    const n = Number(t)
-    if (!Number.isFinite(n) || n <= 0) continue
-    if (n < 1e11) return Math.floor(n * 1000)
-    return Math.floor(n)
-  }
-  return null
-}
-
 function noteCardTimeToMs(t) {
   if (t == null) return null
   const n = Number(t)
   if (!Number.isFinite(n) || n <= 0) return null
   return n < 1e12 ? Math.floor(n * 1000) : Math.floor(n)
+}
+
+/** user_posted 单条：置顶为 interact_info.sticky === true */
+function isPostedNoteSticky(raw) {
+  if (!raw || typeof raw !== 'object') return false
+  return Boolean(raw.interact_info && raw.interact_info.sticky)
 }
 
 function buildExploreNoteUrl(noteId, xsecToken) {
@@ -458,6 +443,9 @@ async function fetchXhsUserTodayPostsRaw(profileUrl, cookieStr, options = {}) {
     if (notes.length === 0) break
 
     let oldestSec = Number.POSITIVE_INFINITY
+    /** 列表一般按发布时间从新到旧；早于筛选起点后无需再请求 feed 或翻页 */
+    let stopCrawl = false
+
     for (const raw of notes) {
       const noteId = String(raw.note_id || raw.id || '').trim()
       if (!noteId) continue
@@ -465,14 +453,15 @@ async function fetchXhsUserTodayPostsRaw(profileUrl, cookieStr, options = {}) {
         ? decodeURIComponent(String(raw.xsec_token))
         : xsecToken
       const noteUrl = buildExploreNoteUrl(noteId, token)
-      let publishMs = notePublishMsFromPosted(raw)
+      /** user_posted 列表不含发布时间，统一走 feed 取时间与正文摘要 */
+      let publishMs = null
       const title = String(
         raw.display_title || raw.title || raw.desc || '',
       ).trim()
       let desc = title
       let noteTypeLabel = raw.type === 'video' ? '视频' : '图文'
 
-      if (publishMs == null && token) {
+      if (token) {
         await sleepRandomBetweenRequestsMs()
         try {
           const feedJson = await fetchNoteFeed(noteUrl, cookieStr)
@@ -494,6 +483,15 @@ async function fetchXhsUserTodayPostsRaw(profileUrl, cookieStr, options = {}) {
 
       if (publishMs == null) continue
       const sec = Math.floor(publishMs / 1000)
+
+      if (sec < startSec) {
+        if (!isPostedNoteSticky(raw)) {
+          stopCrawl = true
+          break
+        }
+        continue
+      }
+
       if (sec < oldestSec) oldestSec = sec
 
       if (sec >= startSec && sec < endSec) {
@@ -508,6 +506,8 @@ async function fetchXhsUserTodayPostsRaw(profileUrl, cookieStr, options = {}) {
         }
       }
     }
+
+    if (stopCrawl) break
 
     if (Number.isFinite(oldestSec) && oldestSec < startSec) {
       break
