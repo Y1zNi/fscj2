@@ -16,7 +16,9 @@
   "pkg": {
     "assets": [
       "dist/**/*",
-      "server/xhs/static/**/*"
+      "server/xhs/static/**/*",
+      "server/xhs/rapWorkerEntry.cjs",
+      "server/xhs/rapParamClient.cjs"
     ],
     "targets": [
       "node18-win-x64",

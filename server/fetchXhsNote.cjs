@@ -13,6 +13,7 @@ function resolveXhsStaticDir() {
     'xhs_xray.js',
     'xhs_xray_pack1.js',
     'xhs_xray_pack2.js',
+    'xhs_rap.js',
   ]
   for (const name of need) {
     if (!fs.existsSync(path.join(dir, name))) {
@@ -27,6 +28,7 @@ function resolveXhsStaticDir() {
 resolveXhsStaticDir()
 // 须为字面路径，便于 pkg 打入可执行文件
 const xs56 = require('./xhs/static/xhs_xs_xsc_56.js')
+const { generateXRapParamAsync } = require('./xhs/rapParamClient.cjs')
 let xrayModule = null
 function requireSilently(modulePath) {
   const oldLog = console.log
@@ -139,6 +141,17 @@ function generateHeaders(a1, api, data, method) {
   return { headers, bodyStr }
 }
 
+/**
+ * 与 Spider_XHS cv-cat get_note_info 一致：POST /api/sns/web/v1/feed 需带 x-rap-param、xy-direction。
+ * x-rap-param 须在 Worker 内生成，避免 xhs_rap.js 污染主线程 globalThis。
+ */
+async function applyNoteFeedWebHeaders(headers, api, bodyStr) {
+  if (!bodyStr) return headers
+  headers['x-rap-param'] = await generateXRapParamAsync(api, bodyStr)
+  headers['xy-direction'] = '13'
+  return headers
+}
+
 function generateRequestParams(cookiesStr, api, data, method) {
   const cookies = transCookies(cookiesStr)
   if (!cookies.a1) {
@@ -248,12 +261,13 @@ async function fetchNoteFeed(noteUrl, cookieStr) {
     xsec_source: xsecSource,
     xsec_token: xsecToken,
   }
-  const { headers, cookies, bodyStr } = generateRequestParams(
-    cookieStr,
+  const baseParams = generateRequestParams(cookieStr, api, data, 'POST')
+  const headers = await applyNoteFeedWebHeaders(
+    { ...baseParams.headers },
     api,
-    data,
-    'POST',
+    baseParams.bodyStr,
   )
+  const { cookies, bodyStr } = baseParams
   const cookieHeader = cookiesToHeader(cookies)
   const requestFeed = async () => {
     const res = await fetch(BASE + api, {
@@ -268,9 +282,14 @@ async function fetchNoteFeed(noteUrl, cookieStr) {
   if (!resJson?.success && Number(resJson?.code) === -1) {
     await sleepMs(600 + Math.floor(Math.random() * 400))
     const retry = generateRequestParams(cookieStr, api, data, 'POST')
+    const retryHeaders = await applyNoteFeedWebHeaders(
+      { ...retry.headers },
+      api,
+      retry.bodyStr,
+    )
     const retryRes = await fetch(BASE + api, {
       method: 'POST',
-      headers: { ...retry.headers, cookie: cookieHeader },
+      headers: { ...retryHeaders, cookie: cookieHeader },
       body: retry.bodyStr,
     })
     resJson = await retryRes.json()
@@ -382,7 +401,8 @@ function buildExploreNoteUrl(noteId, xsecToken) {
     return `https://www.xiaohongshu.com/explore/${id}`
   }
   const tok = encodeURIComponent(String(xsecToken).trim())
-  return `https://www.xiaohongshu.com/explore/${id}?xsec_token=${tok}&xsec_source=pc_user`
+  // 与 PC 侧常见 explore 链接一致：仅带 xsec_token；feed 体里 xsec_source 由 parseNoteUrl 默认 pc_search
+  return `https://www.xiaohongshu.com/explore/${id}?xsec_token=${tok}`
 }
 
 async function fetchUserPostedPage(cookieStr, userId, cursor, xsecToken, xsecSource) {
