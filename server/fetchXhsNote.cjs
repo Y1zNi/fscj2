@@ -325,6 +325,57 @@ function parseUserProfileUrl(profileUrl) {
   return { userId, xsecToken, xsecSource }
 }
 
+/** otherinfo 返回的 interactions 中与 cv-cat 对齐：索引 1 常为粉丝；若带 type/name 则优先匹配 */
+function parseFansCountFromOtherinfo(resJson) {
+  if (!resJson || !resJson.success || !resJson.data) return null
+  const interactions = resJson.data.interactions
+  if (!Array.isArray(interactions)) return null
+  for (let i = 0; i < interactions.length; i++) {
+    const item = interactions[i]
+    if (!item || item.count == null) continue
+    const raw = String(item.type ?? item.name ?? '').toLowerCase()
+    if (
+      raw.includes('粉丝') ||
+      raw.includes('fan') ||
+      raw.includes('follower')
+    ) {
+      const n = Number(item.count)
+      return Number.isFinite(n) ? n : null
+    }
+  }
+  const fb = interactions[1]
+  if (fb && fb.count != null) {
+    const n = Number(fb.count)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+async function fetchUserFansCount(cookieStr, userId) {
+  const api = '/api/sns/web/v1/user/otherinfo'
+  const params = { target_user_id: userId }
+  const spliceApi = spliceStr(api, params)
+  const { headers, cookies } = generateRequestParams(
+    cookieStr,
+    spliceApi,
+    '',
+    'GET',
+  )
+  const cookieHeader = cookiesToHeader(cookies)
+  const res = await fetch(BASE + spliceApi, {
+    method: 'GET',
+    headers: { ...headers, cookie: cookieHeader },
+  })
+  const text = await res.text()
+  let json
+  try {
+    json = JSON.parse(text)
+  } catch {
+    return null
+  }
+  return parseFansCountFromOtherinfo(json)
+}
+
 function normalizeDateScope(scope) {
   const valid = new Set([
     'today',
@@ -442,6 +493,16 @@ async function fetchUserPostedPage(cookieStr, userId, cursor, xsecToken, xsecSou
 async function fetchXhsUserTodayPostsRaw(profileUrl, cookieStr, options = {}) {
   const { userId, xsecToken, xsecSource } = parseUserProfileUrl(profileUrl)
   const { startSec, endSec } = getRangeSecByScope(options.dateScope)
+  const includeFans = Boolean(options.includeFans)
+  let fansCount = null
+  if (includeFans) {
+    try {
+      fansCount = await fetchUserFansCount(cookieStr, userId)
+    } catch {
+      fansCount = null
+    }
+    await sleepRandomBetweenRequestsMs()
+  }
   const seen = new Map()
   let cursor = ''
   let page = 0
@@ -550,6 +611,7 @@ async function fetchXhsUserTodayPostsRaw(profileUrl, cookieStr, options = {}) {
     userId,
     profileUrl: profileUrl.trim(),
     todayPosts,
+    fansCount,
   }
 }
 

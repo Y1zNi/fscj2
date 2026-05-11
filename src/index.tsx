@@ -53,6 +53,9 @@ function App() {
   const [dyTodayCountId, setDyTodayCountId] = useState<string | undefined>()
 
   const [xhsTodayCountId, setXhsTodayCountId] = useState<string | undefined>()
+  const [xhsFansCountFieldId, setXhsFansCountFieldId] = useState<
+    string | undefined
+  >()
 
   const [ahTodayCountId, setAhTodayCountId] = useState<string | undefined>()
   const [dcTodayCountId, setDcTodayCountId] = useState<string | undefined>()
@@ -249,6 +252,7 @@ function App() {
         xhsCookie,
         dyTodayCountId,
         xhsTodayCountId,
+        xhsFansCountFieldId,
         ahTodayCountId,
         dcTodayCountId,
         yiTodayCountId,
@@ -326,8 +330,8 @@ function App() {
                 style={{ display: 'block', marginBottom: 10, fontSize: 12 }}
               >
                 同一列可混排各平台链接。切换标签配置写回列；未选列则该项不落表。
-                主表「同步日期」写回已暂时关闭，仅更新数与明细子表参与写回。明细表每次执行都会新建，
-                命名规则为「平台名_时间范围_执行时间」。
+                主表「同步日期」写回已暂时关闭；范围内更新数、明细子表写回按各 Tab 映射执行；小红书「博主粉丝数」仅映射该列时才请求并写回。
+                明细表每次执行都会新建，命名规则为「平台名_时间范围_执行时间」。
               </Text>
               <div style={{ marginBottom: 6, fontWeight: 500 }}>抓取日期范围</div>
               <Select
@@ -402,8 +406,14 @@ function App() {
                           value={xhsTodayCountId}
                           onChange={setXhsTodayCountId}
                         />
+                        <FieldSelect
+                          label="博主粉丝数（主表：数字列，可选）"
+                          options={numberOptions}
+                          value={xhsFansCountFieldId}
+                          onChange={setXhsFansCountFieldId}
+                        />
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          明细子表自动命名：平台名_时间范围_执行时间
+                          仅在选择「博主粉丝数」列时才请求 otherinfo；未选则不请求。明细子表命名：平台名_时间范围_执行时间
                         </Text>
                       </Space>
                     </MappingFieldScroll>
@@ -604,6 +614,9 @@ function App() {
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">
                 {scopeLabel}更新 {xhsToday.todayPosts.length} 条
+                {xhsToday.fansCount != null
+                  ? ` · 粉丝 ${xhsToday.fansCount}`
+                  : ''}
               </Text>
               <pre
                 style={{

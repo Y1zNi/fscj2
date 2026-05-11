@@ -94,8 +94,10 @@ function mountSocialApiRoutes(mount) {
             )
             return
           }
+          const includeFans = parsed.includeFans === true
           const data = await fetchXhsUserTodayPostsRaw(profileUrl, cookie, {
             dateScope,
+            includeFans,
           })
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           res.end(JSON.stringify({ ok: true, data }))

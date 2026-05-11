@@ -10,18 +10,24 @@ interface XhsUserTodayRawPayload {
   userId?: string
   profileUrl?: string
   todayPosts?: unknown
+  /** otherinfo 解析的粉丝数；拿不到时为 null */
+  fansCount?: number | null
 }
 
 export interface XhsUserTodayPosts {
   userId: string
   profileUrl: string
   todayPosts: XhsTodayPostItem[]
+  fansCount: number | null
 }
 
 export function handleXhsUserTodayResponse(json: unknown): XhsUserTodayPosts {
   const j = json as XhsUserTodayRawPayload
   const userId = String(j.userId || '').trim()
   const profileUrl = String(j.profileUrl || '').trim()
+  const fcRaw = j.fansCount
+  const fansCount =
+    fcRaw != null && Number.isFinite(Number(fcRaw)) ? Number(fcRaw) : null
   const list = Array.isArray(j.todayPosts) ? j.todayPosts : []
   const todayPosts: XhsTodayPostItem[] = []
   for (const one of list) {
@@ -41,5 +47,6 @@ export function handleXhsUserTodayResponse(json: unknown): XhsUserTodayPosts {
     userId,
     profileUrl,
     todayPosts,
+    fansCount,
   }
 }

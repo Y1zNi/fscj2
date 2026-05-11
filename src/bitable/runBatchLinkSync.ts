@@ -103,6 +103,8 @@ export interface BatchLinkSyncConfig {
   /** 主表：本次同步日期（文本 yyyy-mm-dd 或日期列当天 0 点） */
   xhsSyncDateFieldId?: string
   xhsTodayCountId?: string
+  /** 主表数字列：写入 otherinfo 解析的博主粉丝数 */
+  xhsFansCountFieldId?: string
   xhsDetailTableName?: string
   /** 主表：本次同步日期（文本 yyyy-mm-dd 或日期列当天 0 点） */
   ahSyncDateFieldId?: string
@@ -777,8 +779,11 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
   const isDyWritebackEnabled = Boolean(
     config.dySyncDateFieldId || config.dyTodayCountId,
   )
-  const isXhsWritebackEnabled = Boolean(
+  const isXhsDetailWriteback = Boolean(
     config.xhsSyncDateFieldId || config.xhsTodayCountId,
+  )
+  const isXhsBatchEnabled = Boolean(
+    isXhsDetailWriteback || config.xhsFansCountFieldId,
   )
   const isAhWritebackEnabled = Boolean(
     config.ahSyncDateFieldId || config.ahTodayCountId,
@@ -795,7 +800,7 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
         dyDetailTableName,
       )
     : null
-  const xhsDetailCtx = isXhsWritebackEnabled
+  const xhsDetailCtx = isXhsDetailWriteback
     ? await ensureXhsDetailTable(
         xhsDetailTableName,
       )
@@ -808,7 +813,7 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
         )
       : new Map<string, string>()
   const noteIdToRecordIdMap =
-    isXhsWritebackEnabled && xhsDetailCtx
+    isXhsDetailWriteback && xhsDetailCtx
       ? await buildNoteIdToRecordIdMap(
           xhsDetailCtx.detailTable,
           xhsDetailCtx.fieldIds.noteIdFieldId,
@@ -858,7 +863,7 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
         )
       : new Map<string, string>()
   const xhsNoteUrlToRecordIdMap =
-    isXhsWritebackEnabled && xhsDetailCtx
+    isXhsDetailWriteback && xhsDetailCtx
       ? await buildWorkUrlToRecordIdMap(
           xhsDetailCtx.detailTable,
           xhsDetailCtx.fieldIds.noteUrlFieldId,
@@ -1009,7 +1014,7 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
     }
 
     if (isXhs) {
-      if (!isXhsWritebackEnabled || !xhsDetailCtx) {
+      if (!isXhsBatchEnabled) {
         skippedNoWriteback++
         done++
         config.onProgress?.(done, total, rid)
@@ -1027,44 +1032,48 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
           urlRaw,
           config.xhsCookie,
           dateScope,
+          Boolean(config.xhsFansCountFieldId),
         )
         const crawlDate = getDateTextByScope(dateScope)
 
-        for (const item of data.todayPosts) {
-          const recordValue = {
-            fields: {
-              [xhsDetailCtx.fieldIds.mainUrlFieldId]: urlRaw,
-              ...(WRITE_DETAIL_USER_AND_WORK_IDS
-                ? {
-                    [xhsDetailCtx.fieldIds.userIdFieldId]: data.userId || '',
-                    [xhsDetailCtx.fieldIds.noteIdFieldId]: item.noteId,
-                  }
-                : {}),
-              [xhsDetailCtx.fieldIds.noteUrlFieldId]: item.noteUrl,
-              [xhsDetailCtx.fieldIds.descFieldId]: item.desc || '',
-              [xhsDetailCtx.fieldIds.publishAtFieldId]: formatDateTime(
-                item.createTime,
-              ),
-              ...(WRITE_DETAIL_CONTENT_TYPE
-                ? {
-                    [xhsDetailCtx.fieldIds.noteTypeFieldId]: item.noteType || '',
-                  }
-                : {}),
-              [xhsDetailCtx.fieldIds.crawlDateFieldId]: crawlDate,
-            },
-          }
-          const urlKey = normalizeWorkUrlForDedupe(item.noteUrl)
-          const existingRid =
-            noteIdToRecordIdMap.get(item.noteId) ??
-            xhsNoteUrlToRecordIdMap.get(urlKey)
-          if (existingRid) {
-            await xhsDetailCtx.detailTable.setRecord(existingRid, recordValue)
-          } else {
-            const newRid = await xhsDetailCtx.detailTable.addRecord(recordValue)
-            if (item.noteId) {
-              noteIdToRecordIdMap.set(item.noteId, newRid)
+        if (xhsDetailCtx) {
+          for (const item of data.todayPosts) {
+            const recordValue = {
+              fields: {
+                [xhsDetailCtx.fieldIds.mainUrlFieldId]: urlRaw,
+                ...(WRITE_DETAIL_USER_AND_WORK_IDS
+                  ? {
+                      [xhsDetailCtx.fieldIds.userIdFieldId]: data.userId || '',
+                      [xhsDetailCtx.fieldIds.noteIdFieldId]: item.noteId,
+                    }
+                  : {}),
+                [xhsDetailCtx.fieldIds.noteUrlFieldId]: item.noteUrl,
+                [xhsDetailCtx.fieldIds.descFieldId]: item.desc || '',
+                [xhsDetailCtx.fieldIds.publishAtFieldId]: formatDateTime(
+                  item.createTime,
+                ),
+                ...(WRITE_DETAIL_CONTENT_TYPE
+                  ? {
+                      [xhsDetailCtx.fieldIds.noteTypeFieldId]:
+                        item.noteType || '',
+                    }
+                  : {}),
+                [xhsDetailCtx.fieldIds.crawlDateFieldId]: crawlDate,
+              },
             }
-            xhsNoteUrlToRecordIdMap.set(urlKey, newRid)
+            const urlKey = normalizeWorkUrlForDedupe(item.noteUrl)
+            const existingRid =
+              noteIdToRecordIdMap.get(item.noteId) ??
+              xhsNoteUrlToRecordIdMap.get(urlKey)
+            if (existingRid) {
+              await xhsDetailCtx.detailTable.setRecord(existingRid, recordValue)
+            } else {
+              const newRid = await xhsDetailCtx.detailTable.addRecord(recordValue)
+              if (item.noteId) {
+                noteIdToRecordIdMap.set(item.noteId, newRid)
+              }
+              xhsNoteUrlToRecordIdMap.set(urlKey, newRid)
+            }
           }
         }
 
@@ -1077,6 +1086,16 @@ export async function runBatchLinkSync(config: BatchLinkSyncConfig): Promise<{
         if (config.xhsTodayCountId) {
           const f = await table.getField<INumberField>(config.xhsTodayCountId)
           await f.setValue(rid, data.todayPosts.length)
+        }
+        if (
+          config.xhsFansCountFieldId &&
+          data.fansCount != null &&
+          Number.isFinite(data.fansCount)
+        ) {
+          const ff = await table.getField<INumberField>(
+            config.xhsFansCountFieldId,
+          )
+          await ff.setValue(rid, data.fansCount)
         }
         xhsOk++
       } catch (e) {
